@@ -1,0 +1,37 @@
+﻿SampleID,SampleRef,Index,Description,Genotype,Yes,Vector,Group,Project
+JK.9534_2_1,NC_002929.2,AATAATGT,B. pertussis WT -Mg,WT,No,None,WT_No_None,TK_122
+JK.9534_2_2,NC_002929.2,CAACACTT,B. pertussis WT -Mg,WT,No,None,WT_No_None,TK_122
+JK.9534_2_3,NC_002929.2,ATAATTCT,B. pertussis WT -Mg,WT,No,None,WT_No_None,TK_122
+JK.9534_2_4,NC_002929.2,GTCCATAT,B. pertussis WT + Mg,WT,Yes,None,WT_Yes_None,TK_122
+JK.9534_2_5,NC_002929.2,CAAGTGAT,B. pertussis WT + Mg,WT,Yes,None,WT_Yes_None,TK_122
+JK.9534_2_6,NC_002929.2,CGACTTGG,B. pertussis WT + Mg,WT,Yes,None,WT_Yes_None,TK_122
+JK.9534_2_7,NC_002929.2,GCGAGTTG,Delete BP2158 – Mg,Mutant,No,None,Mutant_No_None,TK_122
+JK.9534_2_8,NC_002929.2,AAGACGGG,Delete BP2158 – Mg,Mutant,No,None,Mutant_No_None,TK_122
+JK.9534_2_9,NC_002929.2,CTGTAGGG,Delete BP2158 – Mg,Mutant,No,None,Mutant_No_None,TK_122
+JK.9534_2_10,NC_002929.2,GCCGAGGG,Delete BP2158 + Mg,Mutant,Yes,None,Mutant_Yes_None,TK_122
+JK.9534_2_11,NC_002929.2,GGTACCGG,Delete BP2158 + Mg,Mutant,Yes,None,Mutant_Yes_None,TK_122
+JK.9534_2_12,NC_002929.2,GCCCTCCG,Delete BP2158 + Mg,Mutant,Yes,None,Mutant_Yes_None,TK_122
+JK.9534_2_13,NC_002929.2,ACATGGGT,B. pertussis WT/vector – Mg,WT,No,vector,WT_No_vector,TK_122
+JK.9534_2_14,NC_002929.2,GTACCGAG,B. pertussis WT/vector – Mg,WT,No,vector,WT_No_vector,TK_122
+JK.9534_2_15,NC_002929.2,AAGTGCCG,B. pertussis WT/vector – Mg,WT,No,vector,WT_No_vector,TK_122
+JK.9534_2_16,NC_002929.2,AGTTAGAG,B. pertussis WT/vector + Mg,WT,Yes,vector,WT_Yes_vector,TK_122
+JK.9534_2_17,NC_002929.2,CGATCCAG,B. pertussis WT/vector + Mg,WT,Yes,vector,WT_Yes_vector,TK_122
+JK.9534_2_18,NC_002929.2,GTGGCTGC,B. pertussis WT/vector + Mg,WT,Yes,vector,WT_Yes_vector,TK_122
+JK.9534_2_19,NC_002929.2,ATACAGGC,B. pertussis WT/p2158 – Mg,WT,No,p2158,WT_No_p2158,TK_122
+JK.9534_2_20,NC_002929.2,ACAATCTC,B. pertussis WT/p2158 – Mg,WT,No,p2158,WT_No_p2158,TK_122
+JK.9534_2_21,NC_002929.2,GATGGCTC,B. pertussis WT/p2158 – Mg,WT,No,p2158,WT_No_p2158,TK_122
+JK.9534_2_22,NC_002929.2,GCAGTTAC,B. pertussis WT/p2158 + Mg,WT,Yes,p2158,WT_Yes_p2158,TK_122
+JK.9534_2_23,NC_002929.2,CTTGGGCC,B. pertussis WT/p2158 + Mg,WT,Yes,p2158,WT_Yes_p2158,TK_122
+JK.9534_2_24,NC_002929.2,CGCCAGAC,B. pertussis WT/p2158 + Mg,WT,Yes,p2158,WT_Yes_p2158,TK_122
+JK.9534_2_25,NC_002929.2,AGAGGACC,Delete BP2158/vector – Mg,Mutant,No,vector,Mutant_No_vector,TK_122
+JK.9534_2_26,NC_002929.2,CCCAGACC,Delete BP2158/vector – Mg,Mutant,No,vector,Mutant_No_vector,TK_122
+JK.9534_2_27,NC_002929.2,CACGATGA,Delete BP2158/vector – Mg,Mutant,No,vector,Mutant_No_vector,TK_122
+JK.9534_2_28,NC_002929.2,ATGTTGTA,Delete BP2158/vector + Mg,Mutant,Yes,vector,Mutant_Yes_vector,TK_122
+JK.9534_2_29,NC_002929.2,CCGCGGGA,Delete BP2158/vector + Mg,Mutant,Yes,vector,Mutant_Yes_vector,TK_122
+JK.9534_2_30,NC_002929.2,CATCTGTA,Delete BP2158/vector + Mg,Mutant,Yes,vector,Mutant_Yes_vector,TK_122
+JK.9534_2_31,NC_002929.2,GGCCGGTA,Delete BP2158/p2158 – Mg,Mutant,No,p2158,Mutant_No_p2158,TK_122
+JK.9534_2_32,NC_002929.2,TGTAGCTA,Delete BP2158/p2158 – Mg,Mutant,No,p2158,Mutant_No_p2158,TK_122
+JK.9534_2_33,NC_002929.2,CGTGGTAA,Delete BP2158/p2158 – Mg,Mutant,No,p2158,Mutant_No_p2158,TK_122
+JK.9534_2_34,NC_002929.2,CTGGTTCA,Delete BP2158/p2158 + Mg,Mutant,Yes,p2158,Mutant_Yes_p2158,TK_122
+JK.9534_2_35,NC_002929.2,GTCTCCCA,Delete BP2158/p2158 + Mg,Mutant,Yes,p2158,Mutant_Yes_p2158,TK_122
+JK.9534_2_36,NC_002929.2,GTTAGAAA,Delete BP2158/p2158 + Mg,Mutant,Yes,p2158,Mutant_Yes_p2158,TK_122

@@ -1,0 +1,518 @@
+---
+title: ' RNAseq Analysis E. coli strain MG1655 RNAseq on MG1655 reference'
+author: "Hernan Lorenzi"
+date: "12/06/2023"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+#### Load libraries
+
+```{r load libraries}
+pacman::p_load(AnnotationDbi,pheatmap,EnhancedVolcano,ggpubr,DESeq2,stringr,biomaRt,tidyverse,pcaExplorer,VennDiagram,clusterProfiler,GOSemSim,ggsci,viridis,ggrepel,RColorBrewer,msigdbr,cowplot,enrichplot,ggupset,broom,ggraph,jcolors,ashr)
+
+```
+
+
+```{r}
+
+#
+# --- Function to remove all-zero rows (by adjusting min_total_count the function can filter out rows based on total counts other than 0) ---
+#
+remove_all_zero_rows <- function(df, min_total_count = 0){
+  df <- df[rowSums(df) > min_total_count,]
+  return(df)
+}
+
+
+#
+# --- function for PCA plots ---
+#
+plot_PCA = function(object, color_by="condition", 
+                    shape_by = 19, ntop=500, size = 3,
+                    returnData=FALSE, pcs = c(1,2))
+{
+  # Check variables are present in object
+  intgroup = c(color_by)
+  if (shape_by != 19){intgroup <- c(intgroup, shape_by)}
+  if (!all(intgroup %in% names(colData(object)))) {
+    stop("the argument 'intgroup' should specify columns of colData(dds)")
+  }
+
+  # calculate the variance for each gene
+  rv <- rowVars(assay(object))
+
+  # select the ntop genes by variance
+  select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+
+  # perform a PCA on the data in assay(x) for the selected genes
+  pca <- prcomp(t(assay(object)[select,]))
+
+  # the contribution to the total variance for each component
+  percentVar <- pca$sdev^2 / sum( pca$sdev^2 )
+
+  
+  intgroup.df <- as.data.frame(colData(object)[, intgroup, drop=FALSE])
+  
+  # add the intgroup factors together to create a new grouping factor
+  group <- if (length(intgroup) > 1) {
+    factor(apply( intgroup.df, 1, paste, collapse=":"))
+  } else {
+    colData(object)[[intgroup]]
+  }
+
+  # assembly the data for the plot
+  d <- data.frame(PC1=pca$x[,pcs[1]], PC2=pca$x[,pcs[2]], group=group, intgroup.df, name=colnames(object))
+  colnames(d)[1] <- paste0("PC",pcs[1])
+  colnames(d)[2] <- paste0("PC",pcs[2])
+  
+  if (returnData) {
+    attr(d, "percentVar") <- percentVar[1:2]
+    return(d)
+  }
+  
+  ggplot(data=d, aes_string(x=colnames(d)[1], y=colnames(d)[2], color=color_by, shape=shape_by)) + 
+    geom_point(size=size) + 
+    scale_color_discrete(type = as.vector(jcolors(palette = c("pal8")))) +
+    xlab(paste0("PC",pcs[1],": ",round(percentVar[pcs[1]] * 100),"% variance")) + # fixed
+    ylab(paste0("PC",pcs[2],": ",round(percentVar[pcs[2]] * 100),"% variance")) + # fixed
+    coord_fixed(ratio = (max(d[,1])-min(d[,1]))/(max(d[,2])-min(d[,2])))
+}
+
+```
+
+#### Load read counts data
+
+```{r Loading data}
+all.star <- read.delim2("./data/read_counts.txt", sep = "\t", header = TRUE, row.names = 1, comment.char = c("#") )
+
+names(all.star) <-  stringi::stri_replace(str = names(all.star), replacement = "", regex = "results.03map_reads.") %>% stringi::stri_replace(replacement = "", regex = ".Aligned.sortedByCoord.out.bam")
+
+# Make sure read counts are numeric and rounded to 0 decimals
+all <- as.data.frame(lapply(all.star[,6:41], function(x){ round(as.numeric(x), digits = 0)} ))
+rownames(all) <- rownames(all.star)
+
+#Remove all zero rows
+all <- remove_all_zero_rows(all, min_total_count = 0)
+
+```
+
+#### Make metadata table from 'all'
+
+```{r}
+# Load metadata
+metadata <- read.delim2("./data/metadata.csv", 
+                        sep = ",", 
+                        header = TRUE, 
+                        row.names = 1, 
+                        comment.char = c("#") )
+
+# sort all columns based on metadata row names
+all <- all %>% dplyr::select(rownames(metadata))
+
+# Add total read counts and sample id columns to metadata
+metadata$read_counts <- colSums(all)
+
+# Add "Sample_name" as column in metadata
+metadata$sample_name <- rownames(metadata)
+
+# Add group IDs
+metadata$Group_id <- c(rep("g1", 3),
+                       rep("g2", 3),
+                       rep("g3", 3),
+                       rep("g4", 3),
+                       rep("g5", 3),
+                       rep("g6", 3),
+                       rep("g7", 3),
+                       rep("g8", 3),
+                       rep("g9", 3),
+                       rep("g10", 3),
+                       rep("g11", 3),
+                       rep("g12", 3))
+
+```
+
+#### Normalize data to TPMs to run some comparative analysis across samples
+
+```{r}
+# Function to normalize by TPMs based on transcript length
+# Normalize counts to TPMs
+# Fetch exon length from STAR read counts file 
+normalize_by_TPM <- function(counts.df, gene_length) {
+  
+  # Calculate transcript length in Kb
+  transcript_lengths <- gene_length / 1000
+  transcript_lengths <- subset(transcript_lengths, rownames(transcript_lengths) %in% rownames(counts.df))
+  
+  # Eliminate gene IDs from counts.df without transcript length info in transcript_lengths
+  #transcript_lengths <- transcript_lengths[transcript_lengths$Category %in% rownames(counts.df),]
+  #counts.df <- counts.df[transcript_lengths$Category,]
+  
+  # Sort transcripts_length df by rownames of counts.df
+  transcript_lengths <- transcript_lengths[rownames(counts.df),, drop=F]
+
+  # See reference for formula
+  # https://btep.ccr.cancer.gov/question/faq/what-is-the-difference-between-rpkm-fpkm-and-tpm/
+  x.df <- apply(counts.df, 
+                MARGIN = 2, 
+                FUN = function(x){ 
+                                  reads_per_kb <- x/transcript_lengths$Length
+                                  pmsf <- sum(reads_per_kb) / 1e6
+                                  reads_per_kb/pmsf
+                                  }
+                )
+  
+  return(x.df)
+}
+
+# Using annotation version GRCm39 (current)
+all.tpm <- normalize_by_TPM(counts.df = all, 
+                            gene_length = dplyr::select(all.star, c("Length")))
+```
+
+########################################### 
+# Analysis of expression data using DESeq2
+########################################### 
+
+```{r deseq2}
+# Convert metadata to factors
+for (variable in c("Genotype","Mg","Vector","Group", "Group_id")){
+  print(variable)
+  metadata[,variable] <- as.factor(metadata[,variable])  
+  #metadata[,variable] <- as.factor(str_replace_all(metadata[,variable], pattern = " ", replacement = "_"))  
+}
+
+```
+
+# Analysis of Dataset
+
+*The barcodes and triplicate datasets are:*
+
+1. B. pertussis WT -Mg:
+JK-9534_2_1                AATAATGT
+JK-9534_2_2                CAACACTT
+JK-9534_2_3                ATAATTCT
+ 
+2. B. pertussis WT + Mg:
+JK-9534_2_4                GTCCATAT
+JK-9534_2_5                CAAGTGAT
+JK-9534_2_6                CGACTTGG
+ 
+3. Delete BP2158 – Mg:
+JK-9534_2_7                GCGAGTTG
+JK-9534_2_8                AAGACGGG
+JK-9534_2_9                CTGTAGGG
+ 
+4. Delete BP2158 + Mg:
+JK-9534_2_10              GCCGAGGG
+JK-9534_2_11              GGTACCGG
+JK-9534_2_12              GCCCTCCG
+ 
+5. B. pertussis WT/vector – Mg:
+JK-9534_2_13              ACATGGGT
+JK-9534_2_14              GTACCGAG
+JK-9534_2_15              AAGTGCCG
+ 
+6. B. pertussis WT/vector + Mg:
+JK-9534_2_16              AGTTAGAG
+JK-9534_2_17              CGATCCAG
+JK-9534_2_18              GTGGCTGC
+ 
+7. B. pertussis WT/p2158 – Mg:
+JK-9534_2_19              ATACAGGC
+JK-9534_2_20              ACAATCTC
+JK-9534_2_21              GATGGCTC
+ 
+8. B. pertussis WT/p2158 + Mg:
+JK-9534_2_22              GCAGTTAC
+JK-9534_2_23              CTTGGGCC
+JK-9534_2_24              CGCCAGAC
+ 
+9. Delete BP2158/vector – Mg:
+JK-9534_2_25              AGAGGACC
+JK-9534_2_26              CCCAGACC
+JK-9534_2_27              CACGATGA
+ 
+10. Delete BP2158/vector + Mg:
+JK-9534_2_28              ATGTTGTA
+JK-9534_2_29              CCGCGGGA
+JK-9534_2_30              CATCTGTA
+ 
+11. Delete BP2158/p2158 – Mg:
+JK-9534_2_31              GGCCGGTA
+JK-9534_2_32              TGTAGCTA
+JK-9534_2_33              CGTGGTAA
+ 
+12. Delete BP2158/p2158 + Mg:
+JK-9534_2_34              CTGGTTCA
+JK-9534_2_35              GTCTCCCA
+JK-9534_2_36              GTTAGAAA
+ 
+ 
+*To start we need to compare the following datasets:*
+1 vs 2
+3 vs 4
+3 vs 1
+4 vs 2
+ 
+5 vs 6
+7 vs 8
+7 vs 5
+8 vs 6
+ 
+9 vs 10
+11 vs 12
+11 vs 9
+12 vs 10
+
+
+```{r Dataset one}
+# Generate DESeq2 object for NS and ST condition ONLY. We could potentially add Read_counts as either a covariate or as a factor (by grouping Read counts into Low and High count bins). Ideally, this should be done adding Read_counts as a random effect using mixed models, that can only be applied in Limma package. Adding it as a fixed effect in the design formula might lower the power of the analysis.
+
+dir.create(path = "./Plots", showWarnings = FALSE)
+
+# Create DESeq object
+dds.all <- DESeqDataSetFromMatrix(countData = all, 
+                              colData = metadata,  
+                              design = ~ Group)
+
+# Plot total reads per sample using barchar
+p <- ggbarplot(data = metadata, 
+          x = "sample_name", 
+          y = "read_counts",
+          x.text.angle = 90,
+          fill = "Group", 
+          title = "Total read counts", 
+          ylab = "Read count",
+          sort.by.groups = TRUE,
+          #palette = "pal12",
+          sort.val = "asc") + scale_color_jcolors(palette = "pal12")
+ggsave2("Plots/barplot_read_counts.pdf", plot = p)
+print(p)
+```
+
+```{r}
+# Normalize counts
+vsd.one <- vst(dds.all, blind=FALSE)
+rlog.one <- rlog(dds.all, blind=FALSE)
+
+# Keep genes with at least 20 reads total across samples
+keep <- rowSums(counts(dds.all)) >= 20
+dds.all <- dds.all[keep,]
+
+# Calculate distances between samples
+sampleDists <- dist(t(assay(vsd.one)))
+
+# Plot inter-sample distances
+old.par <- par(no.readonly=T)
+
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(rlog.one$sample_name, rlog.one$Group, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+p.pheatmap <- pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors, fontsize = 8)
+
+ggsave2(filename = "unsupervised_clustering_rnaseq_profile_20plus_reads.pdf", plot = p.pheatmap, path = "./Plots")
+
+p.pheatmap
+```
+*Fig 2:* Samples cluster mainly by Mg treatment
+
+
+```{r}
+
+
+dds_res <- dds.all #[ , dds.all$Tissue=="all_data"]
+
+rlog_res <- list()
+rlog_res <- rlog(dds_res, blind=FALSE)
+
+# PCA
+rlog.one <- rlog_res
+
+# PC1 - PC2
+principal_components <- c(1,2)
+pca_12.p <- plot_PCA(object = rlog.one,color_by = "Group", shape_by = "Mg", returnData = FALSE ,pcs = principal_components)
+
+# PC2 - PC3
+principal_components <- c(2,3)
+pca_23.p <- plot_PCA(object = rlog.one,color_by = "Group", shape_by = "Mg", returnData = FALSE ,pcs = principal_components)
+
+# PC1 - PC3
+principal_components <- c(1,3)
+pca_13.p <- plot_PCA(object = rlog.one,color_by = "Group", shape_by = "Mg", returnData = FALSE ,pcs = principal_components)
+
+ggsave(paste0("Plots/pca_PC12_Group.pdf"), plot = pca_12.p)
+print(pca_12.p)
+ggsave(paste0("Plots/pca_PC13_Group.pdf"), plot = pca_13.p)
+print(pca_13.p)
+ggsave(paste0("Plots/pca_PC23_Group.pdf"), plot = pca_23.p)
+print(pca_23.p)
+
+```
+*Fig 3:* PCA analysis shows that samples separate by Mg treatment.
+
+
+# Run PCAs with Mg treatment
+```{r}
+
+# Split dds object based on Mg treatment
+dds_Mg <- list()
+dds_Mg <- dds.all[ , dds.all$Mg=="Yes"]
+dds_Mg@colData$Mg <- droplevels(dds_Mg@colData$Mg)
+dds_Mg@colData$Group <- droplevels(dds_Mg@colData$Group)
+rlog_Mg <- rlog(dds_Mg, blind=FALSE)
+
+
+# PC1 - PC2
+principal_components <- c(1,2)
+pca_12.p <- plot_PCA(object = rlog_Mg,color_by = "Vector", shape_by = "Genotype", returnData = FALSE ,pcs = principal_components)
+
+# PC2 - PC3
+principal_components <- c(2,3)
+pca_23.p <- plot_PCA(object = rlog_Mg,color_by = "Vector", shape_by = "Genotype", returnData = FALSE ,pcs = principal_components)
+
+# PC1 - PC3
+principal_components <- c(1,3)
+pca_13.p <- plot_PCA(object = rlog_Mg,color_by = "Vector", shape_by = "Genotype", returnData = FALSE ,pcs = principal_components)
+
+ggsave(paste0("Plots/pca_PC12_Group_with_Mg.pdf"), plot = pca_12.p)
+print(pca_12.p)
+ggsave(paste0("Plots/pca_PC13_Group_with_Mg.pdf"), plot = pca_13.p)
+print(pca_13.p)
+ggsave(paste0("Plots/pca_PC23_Group_with_Mg.pdf"), plot = pca_23.p)
+print(pca_23.p)
+
+```
+*Fig 4:* With Mg treatment, PCA analysis shows that samples group mainly by vector treatment and then there is some clustering based on Genotype.
+
+# Run PCAs without Mg treatment
+```{r}
+
+# Split dds object based on Mg treatment
+dds_noMg <- list()
+dds_noMg <- dds.all[ , dds.all$Mg=="No"]
+dds_noMg@colData$Mg <- droplevels(dds_noMg@colData$Mg)
+dds_noMg@colData$Group <- droplevels(dds_noMg@colData$Group)
+rlog_noMg <- rlog(dds_noMg, blind=FALSE)
+
+
+# PC1 - PC2
+principal_components <- c(1,2)
+pca_12.p <- plot_PCA(object = rlog_noMg,color_by = "Vector", shape_by = "Genotype", returnData = FALSE ,pcs = principal_components)
+
+# PC2 - PC3
+principal_components <- c(2,3)
+pca_23.p <- plot_PCA(object = rlog_noMg,color_by = "Vector", shape_by = "Genotype", returnData = FALSE ,pcs = principal_components)
+
+# PC1 - PC3
+principal_components <- c(1,3)
+pca_13.p <- plot_PCA(object = rlog_noMg,color_by = "Vector", shape_by = "Genotype", returnData = FALSE ,pcs = principal_components)
+
+ggsave(paste0("Plots/pca_PC12_Group_without_Mg.pdf"), plot = pca_12.p)
+print(pca_12.p)
+ggsave(paste0("Plots/pca_PC13_Group_without_Mg.pdf"), plot = pca_13.p)
+print(pca_13.p)
+ggsave(paste0("Plots/pca_PC23_Group_without_Mg.pdf"), plot = pca_23.p)
+print(pca_23.p)
+
+```
+*Fig 5:* Without Mg treatment, PCA analysis shows that samples group mainly by presence-absence of any vector and then there is some effect due to Genotype.
+
+### resultsNames(dds)
+
+#### Filtering out poorly-expressed genes (less than 10 reads in at least 3 samples)
+
+```{r filtering genes based on total counts of reads}
+
+# Keep genes with at least 10 reads total across samples
+keep <- rowSums(counts(dds_res) >= 10) >= 3
+dds_res <- dds_res[keep,]
+
+```
+
+##### Using groups instead of interactions
+
+```{r}
+ensembl_to_symbol <- read.delim(file = "./data/gene_names.txt", col.names = c("Locus_tag","gene_name"), header = F)
+
+
+# Define function for processing and saving result tables
+sort_and_write_res_table <- function(result_table, file_name){
+  dir.create(path = "./DE", showWarnings = FALSE)
+  # Sort genes by (padj)
+  result_table_sorted <- result_table[order(result_table$padj, decreasing = FALSE),]
+  # Add gene symbols
+  gene_list <- rownames(result_table_sorted)
+  symbol_list <- ensembl_to_symbol$gene_name[match(gene_list, ensembl_to_symbol$Locus_tag)]
+  df <-as.data.frame(cbind(result_table_sorted, Gene_name = symbol_list))
+  
+  # Write sorted table to file
+  write.table(df, file = paste0("./DE/",file_name,".txt"), 
+            sep = "\t", col.names=NA)
+  return(df)
+}
+```
+
+# the condition effect for genotype I (the main effect)
+results(dds, contrast=c("condition","B","A"))
+
+
+```{r}
+# Contrasts of interest
+my_contrasts <- list("c1"  = c("g1","g2"),
+                    "c2"  = c("g3","g4"),
+                    "c3"  = c("g3","g1"),
+                    "c4"  = c("g4","g2"),
+                    "c5"  = c("g5","g6"),
+                    "c6"  = c("g7","g8"),
+                    "c7"  = c("g7","g5"),
+                    "c8"  = c("g8","g6"),
+                    "c9"  = c("g9","g10"),
+                    "c10" = c("g11","g12"),
+                    "c11" = c("g11","g9"),
+                    "c12" = c("g12","g10")
+                    )
+
+
+# Calculate DE for all_data samples
+#dds_res$group <- relevel(dds_res$group, "37oC_WT")
+
+design(dds_res) <- ~Group_id
+dds_res <- DESeq(dds_res)
+
+# Save sorted files as a list
+DE_results <- list()
+geneids.DE <- list()
+
+for (contrast in names(my_contrasts)){
+  x <- my_contrasts[[contrast]]
+  print(contrast)
+  res <- lfcShrink(dds_res, contrast=c("Group_id",x[1],x[2]), type = "ashr", )
+  from_group <- as.vector(unique(subset(metadata, 
+                                        Group_id == my_contrasts[[contrast]][1])$Group))
+  to_group <- as.vector(unique(subset(metadata, 
+                                        Group_id == my_contrasts[[contrast]][2])$Group))
+  
+  DE_results[[contrast]] <- sort_and_write_res_table(result_table = res,
+                                          file_name = paste0("res_",
+                                                             from_group,"_",
+                                                             x[1],"_vs_",
+                                                             to_group,"_",
+                                                             x[2]))
+}
+
+
+
+```
+
+
+
+```{r}
+print(sessionInfo())
+```
