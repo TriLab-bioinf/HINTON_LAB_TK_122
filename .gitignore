@@ -2,3 +2,12 @@
 .Rhistory
 .RData
 .Ruserdata
+.DS_Store
+.Rprofile
+DE/
+Plots/
+TK_122.Rproj
+data/RNAseq_library_protocol.pdf
+data/ncbi_dataset.zip
+data/ncbi_dataset/
+data/read_counts.summary
