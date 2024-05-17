@@ -1,4 +1,4 @@
-﻿SampleID,SampleRef,Index,Description,Genotype,Yes,Vector,Group,Project
+﻿SampleID,SampleRef,Index,Description,Genotype,Mg,Vector,Group,Project
 JK.9534_2_1,NC_002929.2,AATAATGT,B. pertussis WT -Mg,WT,No,None,WT_No_None,TK_122
 JK.9534_2_2,NC_002929.2,CAACACTT,B. pertussis WT -Mg,WT,No,None,WT_No_None,TK_122
 JK.9534_2_3,NC_002929.2,ATAATTCT,B. pertussis WT -Mg,WT,No,None,WT_No_None,TK_122

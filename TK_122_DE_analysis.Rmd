@@ -11,7 +11,7 @@ output:
 #### Load libraries
 
 ```{r load libraries}
-pacman::p_load(AnnotationDbi,pheatmap,EnhancedVolcano,ggpubr,DESeq2,stringr,biomaRt,tidyverse,pcaExplorer,VennDiagram,clusterProfiler,GOSemSim,ggsci,viridis,ggrepel,RColorBrewer,msigdbr,cowplot,enrichplot,ggupset,broom,ggraph,jcolors,ashr)
+pacman::p_load(AnnotationDbi,pheatmap,EnhancedVolcano,ggpubr,DESeq2,stringr,biomaRt,tidyverse,pcaExplorer,VennDiagram,clusterProfiler,GOSemSim,ggsci,viridis,ggrepel,RColorBrewer,msigdbr,cowplot,enrichplot,ggupset,broom,ggraph,jcolors,ashr, DEGreport)
 
 ```
 
@@ -462,6 +462,17 @@ sort_and_write_res_table <- function(result_table, file_name){
 # the condition effect for genotype I (the main effect)
 results(dds, contrast=c("condition","B","A"))
 
+Can you also run some more DE’s:
+ 
+9 vs. 3
+10 vs. 4
+11 vs. 3
+12 vs. 4
+ 
+9 vs. 5
+10 vs. 6
+11 vs.7
+12 vs. 8
 
 ```{r}
 # Contrasts of interest
@@ -476,7 +487,15 @@ my_contrasts <- list("c1"  = c("g1","g2"),
                     "c9"  = c("g9","g10"),
                     "c10" = c("g11","g12"),
                     "c11" = c("g11","g9"),
-                    "c12" = c("g12","g10")
+                    "c12" = c("g12","g10"),
+                    "c13" = c("g9","g3"),
+                    "c14" = c("g10","g4"),
+                    "c15" = c("g11","g3"),
+                    "c16" = c("g12","g4"),
+                    "c17" = c("g9","g5"),
+                    "c18" = c("g10","g6"),
+                    "c19" = c("g11","g7"),
+                    "c20" = c("g12","g8")
                     )
 
 
@@ -485,7 +504,38 @@ my_contrasts <- list("c1"  = c("g1","g2"),
 
 design(dds_res) <- ~Group_id
 dds_res <- DESeq(dds_res)
+```
 
+# Run data QC
+```{r}
+counts <- counts(dds_res, normalized = TRUE)
+design <- as.data.frame(colData(dds_res))
+```
+
+**Size factor QC**
+A main assumption in library size factor calculation of edgeR and DESeq2 (and others) is that the majority of genes remain unchanged. Plotting the distribution of gene ratios between each gene and the average gene can show how true this is. Not super useful for many samples because the plot becomes crowed.
+```{r}
+degCheckFactors(counts[, 1:6])
+
+```
+
+**Covariates effect on count data**
+Another important analysis to do if you have covariates is to calculate the correlation between PCs from PCA analysis to different variables you may think are affecting the gene expression. This is a toy example of how the function works with raw data, where clearly library size correlates with some of the PCs.
+```{r}
+resCov <- degCovariates(log2(counts(dds_res)+0.5),
+                        colData(dds_res))
+
+```
+
+**Covariates correlation with metrics**
+Also, the correlation among covariates and metrics from the analysis can be tested. This is useful when the study has multiple variables, like in clinical trials. The following code will return a correlation table, and plot the correlation heatmap for all the covariates and metrics in a table.
+```{r}
+cor <- degCorCov(colData(dds_res))
+```
+
+
+# Run the differential expression analysis
+```{r}
 # Save sorted files as a list
 DE_results <- list()
 geneids.DE <- list()
@@ -493,22 +543,174 @@ geneids.DE <- list()
 for (contrast in names(my_contrasts)){
   x <- my_contrasts[[contrast]]
   print(contrast)
+  
+  fileName = paste0("res_",from_group,"_", x[1],"_vs_", to_group,"_", x[2])
+  
   res <- lfcShrink(dds_res, contrast=c("Group_id",x[1],x[2]), type = "ashr", )
+  
+  # QC
+  degQC(counts, design[["Group_id"]], pvalue = res[["pvalue"]])
+  
+  # Save results
   from_group <- as.vector(unique(subset(metadata, 
                                         Group_id == my_contrasts[[contrast]][1])$Group))
   to_group <- as.vector(unique(subset(metadata, 
                                         Group_id == my_contrasts[[contrast]][2])$Group))
   
   DE_results[[contrast]] <- sort_and_write_res_table(result_table = res,
-                                          file_name = paste0("res_",
-                                                             from_group,"_",
-                                                             x[1],"_vs_",
-                                                             to_group,"_",
-                                                             x[2]))
+                                          file_name = fileName)
 }
 
 
 
+```
+
+
+**Run interaction term to look at differential gene response to Mg between mutant and WT strains**
+
+From Debbie: So my question is whether there is something to gain by comparing the EXTENT of changes for 1 vs 3 (wt -/+ Mg) against 3 vs.4 (mutant -/+ Mg). OR would have fallen out already in the 1 vs. 3 and 2 vs. 4 data?  Could I perhaps find a set of genes that are not as extensively changed -/+ Mg with the mutant than they are with WT?
+ 
+```{r}
+
+# Calculate DE for all_data samples
+#dds_res$group <- relevel(dds_res$group, "37oC_WT")
+
+dds_int <- dds_res
+design(dds_int) <- ~ Genotype + Mg + Genotype:Mg
+
+# Keep only g1, g2, g3 and g4
+dds_int <- dds_int[,dds_int$Group_id %in% c("g1","g2","g3","g4")]
+dds_int <- DESeq(dds_int)
+dds_int$Genotype <- droplevels(dds_int$Genotype)
+my_contrasts <- resultsNames(dds_int)
+
+res.int <- lfcShrink(dds_int, type = "ashr", coef = "GenotypeWT.MgYes")
+summary(res.int, alpha = 0.05)
+  
+res.int.sorted <- sort_and_write_res_table(result_table = res.int, 
+                                           file_name = paste0("res.genotype_vs_mg_interaction")
+                                           )
+```
+
+**interaction between WT and WT+p2158 vector +/-Mg**
+groups g1, g2, g7, g8
+```{r}
+
+# Calculate DE for all_data samples
+#dds_res$group <- relevel(dds_res$group, "37oC_WT")
+
+dds_int <- dds_res
+design(dds_int) <- ~ Vector + Mg + Vector:Mg
+
+# Keep only g1, g2, g3 and g4
+dds_int <- dds_int[,dds_int$Group_id %in% c("g1","g2","g7","g8")]
+dds_int$Vector <- droplevels(dds_int$Vector)
+dds_int <- DESeq(dds_int)
+my_contrasts <- resultsNames(dds_int)
+
+res.int <- lfcShrink(dds_int, type = "ashr", coef = "Vectorp2158.MgYes")
+summary(res.int, alpha = 0.05)
+  
+res.int.sorted <- sort_and_write_res_table(result_table = res.int, 
+                                           file_name = paste0("res.Vectorp2158_none_vs_mg_interaction")
+                                           )
+```
+
+**interaction between WT and WT+vector  +/-Mg**
+groups g1, g2, g5, g6
+```{r}
+
+# Calculate DE for all_data samples
+#dds_res$group <- relevel(dds_res$group, "37oC_WT")
+
+dds_int <- dds_res
+design(dds_int) <- ~ Vector + Mg + Vector:Mg
+
+# Keep only g1, g2, g3 and g4
+dds_int <- dds_int[,dds_int$Group_id %in% c("g1","g2","g5","g6")]
+dds_int$Vector <- droplevels(dds_int$Vector)
+dds_int <- DESeq(dds_int)
+my_contrasts <- resultsNames(dds_int)
+
+res.int <- lfcShrink(dds_int, type = "ashr", coef = "Vectorvector.MgYes")
+summary(res.int, alpha = 0.05)
+  
+res.int.sorted <- sort_and_write_res_table(result_table = res.int, 
+                                           file_name = paste0("res.Vector_vector_none_vs_mg_interaction")
+                                           )
+```
+
+**interaction between WT and Mutant+p2158  +/-Mg**
+groups g1, g2, g11, g12
+```{r}
+
+# Calculate DE for all_data samples
+#dds_res$group <- relevel(dds_res$group, "37oC_WT")
+
+dds_int <- dds_res
+design(dds_int) <- ~ Vector + Mg + Vector:Mg
+
+# Keep only g1, g2, g3 and g4
+dds_int <- dds_int[,dds_int$Group_id %in% c("g1","g2","g11","g12")]
+dds_int$Vector <- droplevels(dds_int$Vector)
+dds_int <- DESeq(dds_int)
+my_contrasts <- resultsNames(dds_int)
+
+res.int <- lfcShrink(dds_int, type = "ashr", coef = "Vectorp2158.MgYes")
+summary(res.int, alpha = 0.05)
+  
+res.int.sorted <- sort_and_write_res_table(result_table = res.int, 
+                                           file_name = paste0("res.Vector_MUTp2158_WTnone_vs_mg_interaction")
+                                           )
+```
+
+
+**interaction between Mutant and +/-p2158  +/-Mg**
+groups g3, g4, g11, g12
+```{r}
+
+# Calculate DE for all_data samples
+#dds_res$group <- relevel(dds_res$group, "37oC_WT")
+
+dds_int <- dds_res
+design(dds_int) <- ~ Vector + Mg + Vector:Mg
+
+# Keep only g1, g2, g3 and g4
+dds_int <- dds_int[,dds_int$Group_id %in% c("g3","g4","g11","g12")]
+dds_int$Vector <- droplevels(dds_int$Vector)
+dds_int <- DESeq(dds_int)
+my_contrasts <- resultsNames(dds_int)
+
+res.int <- lfcShrink(dds_int, type = "ashr", coef = "Vectorp2158.MgYes")
+summary(res.int, alpha = 0.05)
+  
+res.int.sorted <- sort_and_write_res_table(result_table = res.int, 
+                                           file_name = paste0("res.Vector_MUTp2158_MUTnone_vs_mg_interaction")
+                                           )
+```
+
+**interaction between Mutant-vector and Mutant-p2158  +/-Mg**
+groups g9, g10, g11, g12
+```{r}
+
+# Calculate DE for all_data samples
+#dds_res$group <- relevel(dds_res$group, "37oC_WT")
+
+dds_int <- dds_res
+design(dds_int) <- ~ Vector + Mg + Vector:Mg
+
+# Keep only g1, g2, g3 and g4
+dds_int <- dds_int[,dds_int$Group_id %in% c("g9","g10","g11","g12")]
+dds_int$Vector <- droplevels(dds_int$Vector)
+dds_int <- DESeq(dds_int)
+my_contrasts <- resultsNames(dds_int)
+
+res.int <- lfcShrink(dds_int, type = "ashr", coef = "Vectorvector.MgYes")
+summary(res.int, alpha = 0.05)
+  
+res.int.sorted <- sort_and_write_res_table(result_table = res.int, 
+                                           file_name = paste0("res.Vector_MUTp2158_MUTvector_vs_mg_interaction")
+                                           )
 ```
 
 
